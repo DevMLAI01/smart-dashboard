@@ -1,9 +1,13 @@
 import { DashboardData } from "./types";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
-// Primary model — routes to the latest DeepSeek V3 instance (faster than pinned version)
-const TEXT_MODEL = "deepseek/deepseek-chat";
-// Vision model for image files — swap to meta-llama/llama-3.2-90b-vision-instruct for higher accuracy
+// Text models tried in order — first available and non-rate-limited wins
+const TEXT_MODELS = [
+  "meta-llama/llama-3.3-70b-instruct", // free, GPT-4 level, most reliable
+  "deepseek/deepseek-chat",             // cheap, excellent reasoning (rate-limited at peak)
+  "qwen/qwen-2.5-72b-instruct",        // free fallback
+];
+// Vision model for image files
 const VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct";
 
 // Leave 5s buffer before Vercel's 60s function timeout so we return a clean error
@@ -52,12 +56,41 @@ function getHeaders(): Record<string, string> {
   };
 }
 
+async function callOpenRouter(
+  model: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: Record<string, any>
+): Promise<{ ok: boolean; rateLimited: boolean; text: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_BASE, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ ...body, model }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("AI processing timed out. Please try a smaller file or try again.");
+    }
+    throw err;
+  }
+  clearTimeout(timer);
+
+  const text = await res.text();
+  return { ok: res.ok, rateLimited: res.status === 429, text };
+}
+
 export async function extractDashboardData(
   content: ContentInput,
   filename: string
 ): Promise<Omit<DashboardData, "id" | "uploadedAt" | "meta">> {
   const isImage = typeof content !== "string";
-  const model = isImage ? VISION_MODEL : TEXT_MODEL;
+  const models = isImage ? [VISION_MODEL] : TEXT_MODELS;
 
   let userContent: unknown[];
 
@@ -85,7 +118,6 @@ export async function extractDashboardData(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body: Record<string, any> = {
-    model,
     max_tokens: 4096,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -98,45 +130,37 @@ export async function extractDashboardData(
     body.response_format = { type: "json_object" };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let lastError = "";
+  for (const model of models) {
+    const { ok, rateLimited, text } = await callOpenRouter(model, body);
 
-  let res: Response;
-  try {
-    res = await fetch(OPENROUTER_BASE, {
-      method: "POST",
-      headers: getHeaders(),
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("AI processing timed out. Please try a smaller file or try again.");
+    if (rateLimited) {
+      console.warn(`[openrouter] ${model} rate-limited, trying next model`);
+      lastError = text;
+      continue;
     }
-    throw err;
+
+    if (!ok) {
+      throw new Error(`OpenRouter error: ${text}`);
+    }
+
+    const json = JSON.parse(text);
+    const raw: string = json.choices?.[0]?.message?.content ?? "";
+
+    // Strip markdown code fences that some models wrap their JSON output in
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      title: parsed.title || filename,
+      subjects: parsed.subjects || [],
+      students: parsed.students || [],
+    };
   }
-  clearTimeout(timer);
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`OpenRouter error ${res.status}: ${errText}`);
-  }
-
-  const json = await res.json();
-  const raw: string = json.choices?.[0]?.message?.content ?? "";
-
-  // Strip markdown code fences that some models wrap their JSON output in
-  const cleaned = raw
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const parsed = JSON.parse(cleaned);
-
-  return {
-    title: parsed.title || filename,
-    subjects: parsed.subjects || [],
-    students: parsed.students || [],
-  };
+  throw new Error(`All AI models are currently rate-limited. Please try again in a moment. (${lastError})`);
 }
