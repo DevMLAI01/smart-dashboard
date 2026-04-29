@@ -40,36 +40,60 @@ Rules:
 - If the document has no student data, return students: []
 - Never invent data that is not in the document`;
 
+type ContentInput =
+  | string
+  | { type: "image"; data: string; mediaType: string }
+  | { type: "pdf"; buffer: Buffer };
+
 export async function extractDashboardData(
-  content: string | { type: "image"; data: string; mediaType: string },
+  content: ContentInput,
   filename: string
 ): Promise<Omit<DashboardData, "id" | "uploadedAt" | "meta">> {
-  const userMessage =
-    typeof content === "string"
-      ? `Document filename: ${filename}\n\nDocument content:\n${content}`
-      : `Document filename: ${filename}\n\nThis is an image of a student document. Extract all student data visible.`;
+  let messageContent: Anthropic.MessageParam["content"];
 
-  const messageContent =
-    typeof content === "string"
-      ? [{ type: "text" as const, text: userMessage }]
-      : [
-          {
-            type: "image" as const,
-            source: {
-              type: "base64" as const,
-              media_type: content.mediaType as
-                | "image/jpeg"
-                | "image/png"
-                | "image/gif"
-                | "image/webp",
-              data: content.data,
-            },
-          },
-          {
-            type: "text" as const,
-            text: `Document filename: ${filename}\n\nExtract all student performance data from this image.`,
-          },
-        ];
+  if (typeof content === "string") {
+    messageContent = [
+      {
+        type: "text",
+        text: `Document filename: ${filename}\n\nDocument content:\n${content}`,
+      },
+    ];
+  } else if (content.type === "image") {
+    messageContent = [
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: content.mediaType as
+            | "image/jpeg"
+            | "image/png"
+            | "image/gif"
+            | "image/webp",
+          data: content.data,
+        },
+      },
+      {
+        type: "text",
+        text: `Document filename: ${filename}\n\nExtract all student performance data from this image.`,
+      },
+    ];
+  } else {
+    // Native PDF support — Claude reads the PDF directly, no server-side parsing needed
+    messageContent = [
+      {
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: content.buffer.toString("base64"),
+        },
+      } as unknown as Anthropic.TextBlockParam,
+      {
+        type: "text",
+        text: `Document filename: ${filename}\n\nExtract all student performance data from this PDF.`,
+      },
+    ];
+  }
 
   const response = await getClient().messages.create({
     model: "claude-sonnet-4-6",

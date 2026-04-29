@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { extractDashboardData } from "@/lib/claude";
 import { saveDashboard } from "@/lib/kv";
-import { parsePdf } from "@/lib/parsers/pdf";
+// parsePdf kept as fallback; PDFs are now sent natively to Claude
 import { parseWord } from "@/lib/parsers/word";
 import { parseExcel } from "@/lib/parsers/excel";
 import { prepareImage } from "@/lib/parsers/image";
@@ -77,8 +77,7 @@ export async function POST(req: NextRequest) {
     let extracted: Awaited<ReturnType<typeof extractDashboardData>>;
 
     if (mime === "application/pdf" || ext === "pdf") {
-      const text = await parsePdf(buffer);
-      extracted = await extractDashboardData(text, name);
+      extracted = await extractDashboardData({ type: "pdf", buffer }, name);
     } else if (
       mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
