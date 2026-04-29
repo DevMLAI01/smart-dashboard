@@ -19,6 +19,9 @@ jobs:
     name: Deploy Preview
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
     environment:
       name: preview
       url: ${{ steps.deploy.outputs.url }}
@@ -65,6 +68,8 @@ jobs:
     name: Deploy Production
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      contents: write
     environment:
       name: production
       url: ${{ steps.deploy.outputs.url }}
@@ -96,6 +101,7 @@ jobs:
           echo "Production URL: $URL"
 
       - name: Comment deployment URL on commit
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
