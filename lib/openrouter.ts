@@ -1,10 +1,13 @@
 import { DashboardData } from "./types";
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
-// Primary model for text/structured data — excellent analytical reasoning
-const TEXT_MODEL = "deepseek/deepseek-chat-v3-0324";
+// Primary model — routes to the latest DeepSeek V3 instance (faster than pinned version)
+const TEXT_MODEL = "deepseek/deepseek-chat";
 // Vision model for image files — swap to meta-llama/llama-3.2-90b-vision-instruct for higher accuracy
 const VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct";
+
+// Leave 5s buffer before Vercel's 60s function timeout so we return a clean error
+const FETCH_TIMEOUT_MS = 55_000;
 
 const SYSTEM_PROMPT = `You are a data extraction engine for student performance documents.
 Your job is to extract structured data from any kind of student record — mark sheets, attendance records, grade reports, or mixed documents — and return it as valid JSON.
@@ -95,11 +98,25 @@ export async function extractDashboardData(
     body.response_format = { type: "json_object" };
   }
 
-  const res = await fetch(OPENROUTER_BASE, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_BASE, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("AI processing timed out. Please try a smaller file or try again.");
+    }
+    throw err;
+  }
+  clearTimeout(timer);
 
   if (!res.ok) {
     const errText = await res.text();
