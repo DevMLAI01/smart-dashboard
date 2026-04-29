@@ -13,7 +13,7 @@ export default function HomePage() {
         <div className="text-center mb-10 max-w-xl">
           <div className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-full px-4 py-1.5 text-blue-400 text-xs font-semibold mb-5">
             <Sparkles className="w-3.5 h-3.5" />
-            Powered by Claude AI
+            Powered by AI
           </div>
           <h1 className="text-4xl font-extrabold text-white leading-tight">
             Turn any student document into a{" "}
@@ -38,7 +38,7 @@ export default function HomePage() {
           <span>·</span>
           <span>Dashboards expire in 7 days</span>
           <span>·</span>
-          <span>No account required</span>
+          <span>3 free uploads · No credit card</span>
         </div>
       </main>
     </div>

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { extractDashboardData } from "@/lib/claude";
-import { saveDashboard } from "@/lib/kv";
-// parsePdf kept as fallback; PDFs are now sent natively to Claude
+import { extractDashboardData } from "@/lib/openrouter";
+import { saveDashboard, getUsageCount, incrementUsage, isUnlocked, FREE_LIMIT } from "@/lib/kv";
+import { parsePdf } from "@/lib/parsers/pdf";
 import { parseWord } from "@/lib/parsers/word";
 import { parseExcel } from "@/lib/parsers/excel";
 import { prepareImage } from "@/lib/parsers/image";
@@ -54,6 +54,24 @@ function computeMeta(students: Student[]) {
 }
 
 export async function POST(req: NextRequest) {
+  // ---- Usage gate ----
+  const userId = req.headers.get("X-Smart-UID") ?? "";
+
+  if (userId) {
+    const [unlocked, count] = await Promise.all([
+      isUnlocked(userId),
+      getUsageCount(userId),
+    ]);
+
+    if (!unlocked && count >= FREE_LIMIT) {
+      return NextResponse.json(
+        { error: "limit_reached", usageCount: count },
+        { status: 429 }
+      );
+    }
+  }
+  // ---- End gate ----
+
   try {
     const form = await req.formData();
     const file = form.get("file") as File | null;
@@ -77,7 +95,8 @@ export async function POST(req: NextRequest) {
     let extracted: Awaited<ReturnType<typeof extractDashboardData>>;
 
     if (mime === "application/pdf" || ext === "pdf") {
-      extracted = await extractDashboardData({ type: "pdf", buffer }, name);
+      const text = await parsePdf(buffer);
+      extracted = await extractDashboardData(text, name);
     } else if (
       mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
@@ -124,6 +143,11 @@ export async function POST(req: NextRequest) {
     };
 
     await saveDashboard(data);
+
+    // Increment usage count; fire-and-forget so a Redis blip doesn't fail the response
+    if (userId) {
+      incrementUsage(userId).catch((e) => console.error("[usage increment]", e));
+    }
 
     return NextResponse.json({ id });
   } catch (err) {

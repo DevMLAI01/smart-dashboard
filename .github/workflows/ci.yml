@@ -41,7 +41,7 @@ jobs:
 
     # Stub env vars so Next.js build doesn't fail on missing secrets
     env:
-      ANTHROPIC_API_KEY: sk-ant-stub-key-for-build-only
+      OPENROUTER_API_KEY: sk-or-stub-key-for-build-only
       UPSTASH_REDIS_REST_URL: https://stub.upstash.io
       UPSTASH_REDIS_REST_TOKEN: stub-token-for-build-only
 

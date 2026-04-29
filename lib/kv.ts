@@ -30,3 +30,28 @@ export async function getDashboard(id: string): Promise<DashboardData | null> {
   if (!raw) return null;
   return typeof raw === "string" ? JSON.parse(raw) : (raw as DashboardData);
 }
+
+// ---- Usage gating ----
+
+const USAGE_TTL = 60 * 60 * 24 * 30; // 30 days
+export const FREE_LIMIT = 3;
+
+export async function getUsageCount(userId: string): Promise<number> {
+  return (await getRedis().get<number>(`usage:${userId}`)) ?? 0;
+}
+
+export async function incrementUsage(userId: string): Promise<void> {
+  const redis = getRedis();
+  await redis.incr(`usage:${userId}`);
+  await redis.expire(`usage:${userId}`, USAGE_TTL);
+}
+
+export async function isUnlocked(userId: string): Promise<boolean> {
+  return (await getRedis().get(`unlocked:${userId}`)) === "1";
+}
+
+export async function unlockUser(userId: string, email: string): Promise<void> {
+  const redis = getRedis();
+  await redis.set(`unlocked:${userId}`, "1", { ex: USAGE_TTL });
+  await redis.sadd("newsletter_emails", email);
+}

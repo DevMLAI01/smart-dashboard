@@ -4,7 +4,10 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useRouter } from "next/navigation";
 import { Upload, FileText, Loader2, AlertCircle } from "lucide-react";
+import { track } from "@vercel/analytics";
 import { FormatBadge, ACCEPTED_FORMATS } from "./FormatBadge";
+import { EmailGate } from "./EmailGate";
+import { getOrCreateUid } from "@/lib/uid";
 
 const ACCEPT = {
   "application/pdf": [".pdf"],
@@ -29,6 +32,7 @@ export function UploadZone() {
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [gateFile, setGateFile] = useState<File | null>(null);
 
   const onDrop = useCallback(
     async (accepted: File[]) => {
@@ -42,25 +46,39 @@ export function UploadZone() {
       const form = new FormData();
       form.append("file", file);
 
+      const userId = getOrCreateUid();
+
       try {
         setStatus("processing");
         const res = await fetch("/api/upload", {
           method: "POST",
+          headers: { "X-Smart-UID": userId },
           body: form,
         });
+
+        if (res.status === 429) {
+          const data = await res.json().catch(() => ({}));
+          if ((data as { error?: string }).error === "limit_reached") {
+            setGateFile(file);
+            setStatus("idle");
+            track("gate_shown");
+            return;
+          }
+        }
 
         if (!res.ok) {
           let message = `Upload failed (HTTP ${res.status})`;
           try {
             const data = await res.json();
-            message = data.error || message;
+            message = (data as { error?: string }).error || message;
           } catch {
-            // response was not JSON (e.g. server misconfiguration)
+            // response was not JSON
           }
           throw new Error(message);
         }
 
-        const { id } = await res.json();
+        const { id } = await res.json() as { id: string };
+        track("upload_completed");
         router.push(`/dashboard/${id}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
@@ -78,77 +96,93 @@ export function UploadZone() {
   });
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-6">
-      <div
-        {...getRootProps()}
-        className={`
-          relative border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200
-          ${isDragActive ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50"}
-          ${status === "uploading" || status === "processing" ? "pointer-events-none opacity-70" : ""}
-        `}
-      >
-        <input {...getInputProps()} />
+    <>
+      <div className="w-full max-w-2xl mx-auto space-y-6">
+        <div
+          {...getRootProps()}
+          className={`
+            relative border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200
+            ${isDragActive ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50"}
+            ${status === "uploading" || status === "processing" ? "pointer-events-none opacity-70" : ""}
+          `}
+        >
+          <input {...getInputProps()} />
 
-        <div className="flex flex-col items-center gap-4">
-          {status === "uploading" || status === "processing" ? (
-            <>
-              <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-              <div>
-                <p className="text-lg font-semibold text-slate-700">
-                  {status === "uploading" ? "Uploading..." : "Analysing with AI..."}
+          <div className="flex flex-col items-center gap-4">
+            {status === "uploading" || status === "processing" ? (
+              <>
+                <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                <div>
+                  <p className="text-lg font-semibold text-slate-700">
+                    {status === "uploading" ? "Uploading..." : "Analysing with AI..."}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {fileName && `Processing ${fileName}`}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
+                  {isDragActive ? (
+                    <FileText className="w-8 h-8 text-blue-600" />
+                  ) : (
+                    <Upload className="w-8 h-8 text-blue-600" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-xl font-semibold text-slate-800">
+                    {isDragActive
+                      ? "Drop your file here"
+                      : "Drag & drop your document"}
+                  </p>
+                  <p className="text-slate-500 mt-1">
+                    or{" "}
+                    <span className="text-blue-600 font-medium underline underline-offset-2">
+                      browse to upload
+                    </span>
+                  </p>
+                </div>
+                <p className="text-sm text-slate-400">
+                  Max file size: 20 MB
                 </p>
-                <p className="text-sm text-slate-500 mt-1">
-                  {fileName && `Processing ${fileName}`}
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
-                {isDragActive ? (
-                  <FileText className="w-8 h-8 text-blue-600" />
-                ) : (
-                  <Upload className="w-8 h-8 text-blue-600" />
-                )}
-              </div>
-              <div>
-                <p className="text-xl font-semibold text-slate-800">
-                  {isDragActive
-                    ? "Drop your file here"
-                    : "Drag & drop your document"}
-                </p>
-                <p className="text-slate-500 mt-1">
-                  or{" "}
-                  <span className="text-blue-600 font-medium underline underline-offset-2">
-                    browse to upload
-                  </span>
-                </p>
-              </div>
-              <p className="text-sm text-slate-400">
-                Max file size: 20 MB
-              </p>
-            </>
-          )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {status === "error" && error && (
+          <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <p className="text-sm">{error}</p>
+          </div>
+        )}
+
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+            Accepted Formats
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {ACCEPTED_FORMATS.map((fmt) => (
+              <FormatBadge key={fmt.label} {...fmt} />
+            ))}
+          </div>
         </div>
       </div>
 
-      {status === "error" && error && (
-        <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-          <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          <p className="text-sm">{error}</p>
-        </div>
+      {gateFile && (
+        <EmailGate
+          queuedFile={gateFile}
+          onSuccess={(id) => {
+            setGateFile(null);
+            router.push(`/dashboard/${id}`);
+          }}
+          onClose={() => {
+            setGateFile(null);
+            setStatus("idle");
+          }}
+        />
       )}
-
-      <div>
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Accepted Formats
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {ACCEPTED_FORMATS.map((fmt) => (
-            <FormatBadge key={fmt.label} {...fmt} />
-          ))}
-        </div>
-      </div>
-    </div>
+    </>
   );
 }
