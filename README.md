@@ -10,6 +10,8 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss)](https://tailwindcss.com)
 [![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?logo=vercel)](https://vercel.com)
 [![Redis](https://img.shields.io/badge/Upstash-Redis-red?logo=redis)](https://upstash.com)
+[![CI](https://github.com/DevMLAI01/smart-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/DevMLAI01/smart-dashboard/actions/workflows/ci.yml)
+[![Deploy](https://github.com/DevMLAI01/smart-dashboard/actions/workflows/deploy.yml/badge.svg)](https://github.com/DevMLAI01/smart-dashboard/actions/workflows/deploy.yml)
 
 **A one-stop solution for trainers and educators** — upload a mark sheet, attendance record, or any student performance document and instantly generate a rich, interactive analytics dashboard with a shareable link. No login required.
 
@@ -321,6 +323,82 @@ Return raw JSON only. Handle missing fields by omitting them.
 ```
 
 **Prompt caching** is enabled on the system prompt using `cache_control: { type: "ephemeral" }` — repeated uploads in the same session reuse the cached prompt, reducing latency and cost by ~90%.
+
+---
+
+## ⚙️ CI/CD Pipeline
+
+The project uses **GitHub Actions** for automated quality checks and deployment.
+
+### Pipeline Overview
+
+```mermaid
+flowchart LR
+    subgraph Trigger["🔔 Trigger"]
+        PR[Pull Request]
+        PUSH[Push to master]
+    end
+
+    subgraph CI["✅ CI — Quality Gate (ci.yml)"]
+        TC[Type Check\ntsc --noEmit]
+        LN[Lint\neslint]
+        BD[Build\nnext build]
+        TC --> LN --> BD
+    end
+
+    subgraph CD["🚀 CD — Deploy (deploy.yml)"]
+        PV[Preview Deploy\nVercel Preview URL]
+        PD[Production Deploy\nVercel Production]
+    end
+
+    PR --> CI
+    PR --> PV
+    PUSH --> CI
+    PUSH --> PD
+
+    CI -->|"✓ passes"| PD
+    PV -->|"💬 Posts URL on PR"| PR
+    PD -->|"💬 Posts URL on commit"| PUSH
+```
+
+### Workflows
+
+| Workflow | File | Runs on | Steps |
+|---|---|---|---|
+| **CI** | `ci.yml` | Every push + PR | `typecheck` → `lint` → `build` |
+| **Deploy Preview** | `deploy.yml` | Pull Requests | Build + deploy to Vercel preview URL, posts link on PR |
+| **Deploy Production** | `deploy.yml` | Push to `master` | Build + deploy to Vercel production, posts URL on commit |
+
+### Required GitHub Secrets
+
+```
+VERCEL_TOKEN          → Vercel personal access token (vercel.com/account/tokens)
+VERCEL_ORG_ID         → team_mHbUYlrkZbdGlD2ytK2sYxsU  (already set)
+VERCEL_PROJECT_ID     → prj_hC3J1sNt3S3hq23SC50MQMNDQMrV  (already set)
+ANTHROPIC_API_KEY     → (already set)
+UPSTASH_REDIS_REST_URL   → (already set)
+UPSTASH_REDIS_REST_TOKEN → (already set)
+```
+
+> **One manual step:** Create a classic token at [vercel.com/account/tokens](https://vercel.com/account/tokens) and add it as `VERCEL_TOKEN`. Full setup guide: [.github/SETUP_SECRETS.md](.github/SETUP_SECRETS.md)
+
+### Setting secrets via CLI
+
+```bash
+# Add VERCEL_TOKEN after creating it at vercel.com/account/tokens
+gh secret set VERCEL_TOKEN --body "your-token" --repo DevMLAI01/smart-dashboard
+
+# Verify all 6 secrets are present
+gh secret list --repo DevMLAI01/smart-dashboard
+```
+
+### Run checks locally (same as CI)
+
+```bash
+npm run typecheck   # TypeScript check
+npm run lint        # ESLint
+npm run build       # Production build
+```
 
 ---
 
