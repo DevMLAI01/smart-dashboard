@@ -1,9 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { DashboardData } from "./types";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+let _client: Anthropic | null = null;
+
+function getClient(): Anthropic {
+  if (!_client) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY environment variable is not set");
+    }
+    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  return _client;
+}
 
 const SYSTEM_PROMPT = `You are a data extraction engine for student performance documents.
 Your job is to extract structured data from any kind of student record — mark sheets, attendance records, grade reports, or mixed documents — and return it as valid JSON.
@@ -63,7 +71,7 @@ export async function extractDashboardData(
           },
         ];
 
-  const response = await client.messages.create({
+  const response = await getClient().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system: [

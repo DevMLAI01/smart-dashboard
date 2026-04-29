@@ -50,8 +50,14 @@ export function UploadZone() {
         });
 
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Upload failed");
+          let message = `Upload failed (HTTP ${res.status})`;
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            // response was not JSON (e.g. server misconfiguration)
+          }
+          throw new Error(message);
         }
 
         const { id } = await res.json();
