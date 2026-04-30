@@ -4,10 +4,7 @@ export async function parsePdf(buffer: Buffer): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).DOMMatrix = class DOMMatrix {};
   }
-  // pdf-parse v2.x exports a class (PDFParse), not a callable function
-  const { PDFParse } = require("pdf-parse");
-  const parser = new PDFParse({ data: buffer, verbosity: 0 });
-  const result = await parser.getText();
-  await parser.destroy();
-  return result.text as string;
+  const pdfParse = require("pdf-parse");
+  const data = await pdfParse(buffer);
+  return data.text as string;
 }
